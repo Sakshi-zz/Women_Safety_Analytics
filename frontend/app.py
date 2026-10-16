@@ -1,8 +1,9 @@
 import streamlit as st
 import requests
 import pandas as pd
-from heatmap import render_heatmap
-# ---------- Custom CSS (must be before set_page_config) ----------
+from charts import render_trends_chart, render_donut
+
+# ---------- Custom CSS ----------
 st.markdown("""
 <style>
     [data-testid="stMetric"] {
@@ -28,17 +29,25 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- Page config (must be the FIRST st.* call) ----------
+# ---------- Page config ----------
 st.set_page_config(
     page_title="Women Safety Analytics",
     page_icon="🛡️",
     layout="wide",
 )
 
+# ---------- Safe import of heatmap ----------
+try:
+    from heatmap import render_heatmap
+    HEATMAP_AVAILABLE = True
+except Exception as e:
+    HEATMAP_AVAILABLE = False
+    HEATMAP_ERROR = str(e)
+
 # ---------- Constants ----------
 API_URL = "http://localhost:8000"
 
-# ---------- Sidebar (defines 'page') ----------
+# ---------- Sidebar ----------
 st.sidebar.title("🛡️ Women Safety")
 st.sidebar.markdown("Analytics & Risk Prediction System")
 st.sidebar.markdown("---")
@@ -47,50 +56,132 @@ page = st.sidebar.radio(
     ["🏠 Dashboard", "🔮 Risk Prediction", "📈 Trends", "🚨 SOS"]
 )
 
+# Metric cards
 # ---------- Page: Dashboard ----------
 if page == "🏠 Dashboard":
     st.title("🛡️ Women Safety Analytics & Risk Prediction System")
     st.caption("Safer Communities | Smarter Decisions | Empowered Women")
 
-    st.markdown("### Welcome")
-    st.write(
-        "This dashboard provides real-time insights into women's safety "
-        "across India using historical NCRB data (2017–2023)."
-    )
-
+    # ---------- Top metrics ----------
     try:
-        trends = requests.get(f"{API_URL}/trends").json()
-        latest_year = trends["years"][-1]
-        latest_crimes = trends["total_crimes"][-1]
+        hm = requests.get(f"{API_URL}/heatmap-data?year=2023", timeout=10).json()
+        districts = pd.DataFrame(hm["districts"])
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Districts Analyzed", "771")
-        col2.metric("Years Covered", "2017–2023")
-        col3.metric(f"Crimes in {latest_year}", f"{latest_crimes:,}")
+        total_incidents = int(districts["total_crimes"].sum())
+        total_districts = len(districts)
+
+        # Compute average severity to classify overall risk
+        avg_severity = districts["severity_score"].mean()
+
+        # High risk = districts above 75th percentile of severity
+        high_threshold = districts["severity_score"].quantile(0.75)
+        high_risk_count = (districts["severity_score"] >= high_threshold).sum()
+
+        # Average risk label
+        if avg_severity >= districts["severity_score"].quantile(0.75):
+            avg_risk_label = "High"
+            avg_risk_color = "#EF4444"
+        elif avg_severity >= districts["severity_score"].quantile(0.25):
+            avg_risk_label = "Moderate"
+            avg_risk_color = "#F59E0B"
+        else:
+            avg_risk_label = "Low"
+            avg_risk_color = "#10B981"
+
+        # ---------- Cards ----------
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#1E293B 0%,#0F172A 100%);
+                        border-left:4px solid #7C3AED;
+                        border-radius:12px; padding:18px;
+                        box-shadow:0 4px 14px rgba(0,0,0,0.35);">
+                <div style="color:#94A3B8; font-size:0.85rem; letter-spacing:0.5px;">
+                    TOTAL INCIDENTS
+                </div>
+                <div style="color:#F1F5F9; font-size:2rem; font-weight:700; margin-top:6px;">
+                    {total_incidents:,}
+                </div>
+                <div style="color:#10B981; font-size:0.85rem; margin-top:6px;">
+                    across {total_districts} districts (2023)
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with c2:
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#1E293B 0%,#0F172A 100%);
+                        border-left:4px solid #EF4444;
+                        border-radius:12px; padding:18px;
+                        box-shadow:0 4px 14px rgba(0,0,0,0.35);">
+                <div style="color:#94A3B8; font-size:0.85rem; letter-spacing:0.5px;">
+                    HIGH RISK AREAS
+                </div>
+                <div style="color:#F1F5F9; font-size:2rem; font-weight:700; margin-top:6px;">
+                    {int(high_risk_count)}
+                </div>
+                <div style="color:#EF4444; font-size:0.85rem; margin-top:6px;">
+                    out of {total_districts} total areas
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with c3:
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#1E293B 0%,#0F172A 100%);
+                        border-left:4px solid {avg_risk_color};
+                        border-radius:12px; padding:18px;
+                        box-shadow:0 4px 14px rgba(0,0,0,0.35);">
+                <div style="color:#94A3B8; font-size:0.85rem; letter-spacing:0.5px;">
+                    AVERAGE RISK LEVEL
+                </div>
+                <div style="color:{avg_risk_color}; font-size:2rem; font-weight:700; margin-top:6px;">
+                    {avg_risk_label}
+                </div>
+                <div style="color:#94A3B8; font-size:0.85rem; margin-top:6px;">
+                    (Overall India — 2023)
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
     except Exception as e:
-        st.warning(f"⚠️ Could not reach the API. Make sure the backend is running. Error: {e}")
+        st.warning(f"⚠️ Could not compute metrics: {e}")
 
-if page == "🏠 Dashboard":
-    st.title("🛡️ Women Safety Analytics & Risk Prediction System")
-    st.caption("Safer Communities | Smarter Decisions | Empowered Women")
+    # ---------- Heatmap ----------
+    st.markdown("---")
+    if HEATMAP_AVAILABLE:
+        render_heatmap(year=2023)
+    else:
+        st.error(f"⚠️ Heatmap module failed to load: {HEATMAP_ERROR}")
 
-    st.markdown("### Welcome")
-    st.write(
-        "This dashboard provides real-time insights into women's safety "
-        "across India using historical NCRB data (2017–2023)."
-    )
+    # ---------- Charts ----------
+    st.markdown("---")
+    selected_district = st.session_state.get("user_district")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        render_trends_chart(district_name=selected_district)
+    with col2:
+        render_donut(district_name=selected_district)
 
-    try:
-        trends = requests.get(f"{API_URL}/trends").json()
-        latest_year = trends["years"][-1]
-        latest_crimes = trends["total_crimes"][-1]
+    # Heatmap
+    st.markdown("---")
+    if HEATMAP_AVAILABLE:
+        render_heatmap(year=2023)
+    else:
+        st.error(f"⚠️ Heatmap module failed to load: {HEATMAP_ERROR}")
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Districts Analyzed", "771")
-        col2.metric("Years Covered", "2017–2023")
-        col3.metric(f"Crimes in {latest_year}", f"{latest_crimes:,}")
-    except Exception as e:
-        st.warning(f"⚠️ Could not reach the API. Make sure the backend is running. Error: {e}")
+        # ---------- Charts ----------
+    st.markdown("---")
+
+    # Read the district the user picked in the heatmap
+    selected_district = st.session_state.get("user_district")
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        render_trends_chart(district_name=selected_district)
+    with col2:
+        render_donut(district_name=selected_district)
 
 # ---------- Page: Risk Prediction ----------
 elif page == "🔮 Risk Prediction":
@@ -115,7 +206,8 @@ elif page == "🔮 Risk Prediction":
                     "year": int(year),
                     "state_code": int(state_code),
                     "district_code": int(district_code),
-                }
+                },
+                timeout=10,
             )
             result = response.json()
 
@@ -143,7 +235,7 @@ elif page == "📈 Trends":
     st.caption("Yearly crime trends across India (2017–2023)")
 
     try:
-        trends = requests.get(f"{API_URL}/trends").json()
+        trends = requests.get(f"{API_URL}/trends", timeout=5).json()
         df = pd.DataFrame({
             "Year": trends["years"],
             "Total Crimes": trends["total_crimes"],
@@ -168,6 +260,3 @@ elif page == "🚨 SOS":
     st.write("- National Emergency: **112**")
     st.write("- Women Helpline: **1091**")
     st.write("- Police: **100**")
-        # ---------- Heatmap ----------
-    st.markdown("---")
-    render_heatmap(year=2023)
