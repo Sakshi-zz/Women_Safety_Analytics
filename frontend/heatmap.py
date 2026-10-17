@@ -1,6 +1,6 @@
 import streamlit as st
 import folium
-from folium.plugins import HeatMap
+from folium.plugins import HeatMap, MarkerCluster
 from streamlit_folium import st_folium
 import requests
 import pandas as pd
@@ -9,64 +9,56 @@ API_URL = "http://localhost:8000"
 
 
 def get_user_location(df):
-    """
-    Let the user pick a district by name, or use browser GPS.
-    Returns (lat, lon, district_name) or (None, None, None).
-    """
-    st.markdown("#### 📍 Choose Your Location")
+    st.markdown("#### 📍 Your Location")
+    col1, col2 = st.columns([3, 1])
 
-    tab1, tab2 = st.tabs(["🔍 By District Name", "📱 Use My GPS"])
-
-    # --- Tab 1: District name search ---
-    with tab1:
-        district_names = sorted(df["district_name"].dropna().unique().tolist())
-        selected = st.selectbox(
-            "Type or select your district:",
-            options=["-- Select --"] + district_names,
-            key="district_select",
-        )
-
-        if selected != "-- Select --":
-            row = df[df["district_name"] == selected].iloc[0]
-            lat = row["latitude"]
-            lon = row["longitude"]
-            if pd.notna(lat) and pd.notna(lon):
-                st.session_state["user_lat"] = lat
-                st.session_state["user_lon"] = lon
-                st.session_state["user_district"] = selected
-                st.success(f"Selected: {selected} ({lat:.3f}, {lon:.3f})")
-            else:
-                st.warning(f"No coordinates for {selected}. Try another district.")
-
-    # --- Tab 2: Browser GPS ---
-    with tab2:
-        try:
-            from streamlit_js_eval import get_geolocation
-            if st.button("📍 Use My GPS Location", key="use_gps_btn"):
+    with col1:
+        st.write("Tap the button to use your current location, or select manually below.")
+    with col2:
+        if st.button("📍 Use My Location", key="use_location_btn"):
+            try:
+                from streamlit_js_eval import get_geolocation
                 loc = get_geolocation()
                 if loc and "coords" in loc:
                     st.session_state["user_lat"] = loc["coords"]["latitude"]
                     st.session_state["user_lon"] = loc["coords"]["longitude"]
-                    st.session_state["user_district"] = "Your Location"
-                    st.success(
-                        f"Detected: {loc['coords']['latitude']:.4f}, "
-                        f"{loc['coords']['longitude']:.4f}"
-                    )
-        except ImportError:
-            st.info("GPS unavailable. Use the district selector instead.")
+                    st.session_state["user_district"] = "GPS Location"
+                    st.success("Location detected!")
+                else:
+                    st.warning("GPS blocked by browser. Use manual entry below.")
+            except ImportError:
+                st.warning("streamlit-js-eval not installed. Use manual entry below.")
 
-    return (
-        st.session_state.get("user_lat"),
-        st.session_state.get("user_lon"),
-        st.session_state.get("user_district"),
-    )
+    with st.expander("Or select your district manually"):
+        # We pass df in, so we can list the districts
+        district_names = sorted(df["district_name"].dropna().unique())
+        
+        selected = st.selectbox(
+            "Search for your district:", 
+            options=["-- Select --"] + district_names
+        )
+        
+        if selected != "-- Select --":
+            row = df[df["district_name"] == selected].iloc[0]
+            lat = row["latitude"]
+            lon = row["longitude"]
+            
+            if pd.notna(lat) and pd.notna(lon):
+                st.session_state["user_lat"] = lat
+                st.session_state["user_lon"] = lon
+                st.session_state["user_district"] = selected
+                st.success(f"Selected: {selected}")
+            else:
+                st.warning(f"Coordinates missing for {selected}. Try another district.")
+
+    return st.session_state.get("user_lat"), st.session_state.get("user_lon")
 
 
 def render_heatmap(year: int = 2023):
     st.markdown("### 🗺️ Risk Heatmap")
-    st.caption("Select your district to see nearby risk zones.")
+    st.caption("Glowing hotspots = high severity. Red = Top 10% most dangerous districts.")
 
-    # 1. Fetch data
+    # 1. FETCH DATA FIRST
     try:
         response = requests.get(f"{API_URL}/heatmap-data?year={year}", timeout=10)
         data = response.json()
@@ -81,10 +73,23 @@ def render_heatmap(year: int = 2023):
 
     df = df.dropna(subset=["latitude", "longitude"])
 
-    # 2. Location picker
-    user_lat, user_lon, district_name = get_user_location(df)
+    # 2. THEN GET LOCATION (using the loaded df)
+    user_lat, user_lon = get_user_location(df)
 
-    # 3. Map center
+    # 3. CALCULATE HEAT WEIGHTS (Strict Percentiles)
+    p90 = df["severity_score"].quantile(0.90)
+    p75 = df["severity_score"].quantile(0.75)
+    p50 = df["severity_score"].quantile(0.50)
+
+    def get_heat_weight(score):
+        if score >= p90: return 1.0  # Red
+        if score >= p75: return 0.7  # Orange
+        if score >= p50: return 0.4  # Yellow
+        return 0.1                   # Green/Blue
+        
+    df["weight"] = df["severity_score"].apply(get_heat_weight)
+
+    # 4. SET MAP CENTER
     if user_lat and user_lon:
         center = [user_lat, user_lon]
         zoom = 8
@@ -92,7 +97,7 @@ def render_heatmap(year: int = 2023):
         center = [22.0, 79.0]
         zoom = 5
 
-    # 4. Base map — OpenStreetMap (no API key)
+    # 5. BUILD MAP
     m = folium.Map(
         location=center,
         zoom_start=zoom,
@@ -101,11 +106,11 @@ def render_heatmap(year: int = 2023):
         control_scale=True,
     )
 
-    # 5. User marker
+    # 6. ADD USER MARKER
     if user_lat and user_lon:
         folium.Marker(
             [user_lat, user_lon],
-            popup=district_name or "Selected",
+            popup="You are here",
             icon=folium.Icon(color="blue", icon="user", prefix="fa"),
         ).add_to(m)
         folium.Circle(
@@ -116,66 +121,82 @@ def render_heatmap(year: int = 2023):
             fill_opacity=0.15,
         ).add_to(m)
 
-    # 6. Add heatmap layer (glow)
-    max_sev = df["severity_score"].max()
-    df["weight"] = df["severity_score"] / max_sev if max_sev > 0 else 0.5
-
+    # 7. ADD HEATMAP LAYER
     heat_data = df[["latitude", "longitude", "weight"]].values.tolist()
     HeatMap(
         heat_data,
-        radius=18,
-        blur=20,
-        min_opacity=0.35,
+        radius=20,
+        blur=15,
+        min_opacity=0.5,
         max_zoom=6,
         gradient={
-            "0.0": "#10B981",
-            "0.4": "#F59E0B",
-            "0.7": "#F97316",
-            "1.0": "#DC2626",
+            "0.2": "#3B82F6", # Blue (Low)
+            "0.4": "#10B981", # Green
+            "0.6": "#F59E0B", # Yellow
+            "0.8": "#F97316", # Orange
+            "1.0": "#DC2626", # Red (High)
         },
     ).add_to(m)
 
-    # 7. Add circle markers for the top 20 districts (shows names)
-    top20 = df.nlargest(20, "severity_score")
-    for _, row in top20.iterrows():
-        color = "#DC2626" if row["weight"] > 0.7 else (
-            "#F59E0B" if row["weight"] > 0.4 else "#10B981"
-        )
+    # 8. ADD CLUSTERED MARKERS
+    marker_cluster = MarkerCluster(name="District Details").add_to(m)
+    
+    for _, row in df.iterrows():
+        if row["weight"] == 1.0:
+            color = "#DC2626"
+        elif row["weight"] >= 0.7:
+            color = "#F59E0B"
+        else:
+            color = "#10B981"
+            
+        popup_html = f"""
+        <div style="font-family: sans-serif; min-width: 150px;">
+            <h4 style="margin:0; color:#333;">{row['district_name']}</h4>
+            <p style="margin: 2px 0; color:#666; font-size:12px;">{row['state_name']}</p>
+            <hr style="margin: 5px 0;">
+            <b>Crimes:</b> {int(row['total_crimes']):,}<br>
+            <b>Severity:</b> {int(row['severity_score']):,}
+        </div>
+        """
+        
         folium.CircleMarker(
-            [row["latitude"], row["longitude"]],
+            location=[row["latitude"], row["longitude"]],
             radius=6,
             color=color,
             fill=True,
+            fill_color=color,
             fill_opacity=0.9,
-            popup=f"<b>{row['district_name']}</b><br>"
-                  f"{row['state_name']}<br>"
-                  f"Severity: {int(row['severity_score'])}",
-        ).add_to(m)
+            weight=1,
+            popup=folium.Popup(popup_html, max_width=250),
+            tooltip=row["district_name"]
+        ).add_to(marker_cluster)
 
-    # 8. Legend
+    # 9. ADD CONTROLS & LEGEND
+    folium.LayerControl().add_to(m)
+
     legend_html = """
-    <div style="position: fixed;
-                bottom: 30px; left: 30px; width: 150px; height: 100px;
+    <div style="position: fixed; bottom: 30px; left: 30px; width: 160px;
                 background-color: #1E293B; border: 1px solid #334155;
-                border-radius: 8px; padding: 10px; z-index: 9999;
+                border-radius: 8px; padding: 12px; z-index: 9999;
                 font-size: 13px; color: #E2E8F0;">
         <b>Risk Level</b><br>
-        <span style="color:#DC2626;">●</span> High<br>
-        <span style="color:#F97316;">●</span> Medium<br>
+        <span style="color:#DC2626;">●</span> Critical (Top 10%)<br>
+        <span style="color:#F97316;">●</span> High<br>
+        <span style="color:#F59E0B;">●</span> Medium<br>
         <span style="color:#10B981;">●</span> Low
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # 9. Render
+    # 10. RENDER MAP
     st_folium(m, width=None, height=520, returned_objects=[])
 
-    # 10. Summary
+    # 11. SUMMARY METRICS
     st.markdown("---")
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("#### 🔴 Top 5 High-Risk Districts")
+        st.markdown("#### 🔴 Top 5 Critical Districts")
         top5 = df.nlargest(5, "severity_score")[
             ["district_name", "state_name", "total_crimes", "severity_score"]
         ]
@@ -186,4 +207,4 @@ def render_heatmap(year: int = 2023):
         st.metric("Districts shown", f"{len(df)}")
         st.metric("Highest severity", f"{int(df['severity_score'].max()):,}")
         if user_lat and user_lon:
-            st.metric("Selected district", district_name or "—")
+            st.metric("Selected district", st.session_state.get("user_district") or "—")

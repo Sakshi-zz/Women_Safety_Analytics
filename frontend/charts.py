@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 import requests
 import pandas as pd
 
-API_URL = "http://localhost:8000"
+API_URL = "http://localhost:8080"
 
 SHORT_LABELS = {
     "cruelty_by_husband_or_his_relatives": "Domestic Cruelty",
@@ -67,8 +67,7 @@ def render_trends_chart(district_name: str = None):
         margin=dict(l=10, r=10, t=10, b=10),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
-
+    st.plotly_chart(fig, use_container_width=True, key="trends_chart")
 
 def render_donut(district_name: str = None):
     st.markdown("### 🍩 Incident Categories")
@@ -127,4 +126,4 @@ def render_donut(district_name: str = None):
         margin=dict(l=10, r=10, t=10, b=100),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="donut_chart")
