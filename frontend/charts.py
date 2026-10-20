@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 import requests
 import pandas as pd
 
-API_URL = "http://localhost:8080"
+API_URL = "http://localhost:8000"
 
 SHORT_LABELS = {
     "cruelty_by_husband_or_his_relatives": "Domestic Cruelty",

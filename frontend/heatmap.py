@@ -188,23 +188,27 @@ def render_heatmap(year: int = 2023):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # 10. RENDER MAP
-    st_folium(m, width=None, height=520, returned_objects=[])
+         # ... (Keep everything above this the same) ...
 
-    # 11. SUMMARY METRICS
-    st.markdown("---")
-    col1, col2 = st.columns(2)
+        # ... (Your map creation code above stays the same) ...
 
-    with col1:
-        st.markdown("#### 🔴 Top 5 Critical Districts")
-        top5 = df.nlargest(5, "severity_score")[
-            ["district_name", "state_name", "total_crimes", "severity_score"]
-        ]
-        st.dataframe(top5, use_container_width=True, hide_index=True)
+    # 10. DEFINE THE CALLBACK FUNCTION
+    # This runs BEFORE the page redraws
+    def handle_map_click():
+        map_state = st.session_state.get("my_map")
+        if map_state and map_state.get("last_object_clicked_tooltip"):
+            clicked_district = map_state["last_object_clicked_tooltip"]
+            st.session_state["user_district"] = clicked_district
 
-    with col2:
-        st.markdown("#### 📊 Summary")
-        st.metric("Districts shown", f"{len(df)}")
-        st.metric("Highest severity", f"{int(df['severity_score'].max()):,}")
-        if user_lat and user_lon:
-            st.metric("Selected district", st.session_state.get("user_district") or "—")
+    # 11. RENDER MAP
+    st_folium(
+        m, 
+        width=None, 
+        height=900, 
+        key="my_map",               # <-- REQUIRED for callbacks
+        on_select=handle_map_click, # <-- Runs the function immediately
+        selection_mode="markers"
+    )
+
+    
+  
