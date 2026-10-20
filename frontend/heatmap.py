@@ -188,27 +188,20 @@ def render_heatmap(year: int = 2023):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-         # ... (Keep everything above this the same) ...
-
-        # ... (Your map creation code above stays the same) ...
-
-    # 10. DEFINE THE CALLBACK FUNCTION
-    # This runs BEFORE the page redraws
-    def handle_map_click():
-        map_state = st.session_state.get("my_map")
-        if map_state and map_state.get("last_object_clicked_tooltip"):
-            clicked_district = map_state["last_object_clicked_tooltip"]
-            st.session_state["user_district"] = clicked_district
-
-    # 11. RENDER MAP
-    st_folium(
+        # 10. RENDER MAP
+    map_data = st_folium(
         m, 
         width=None, 
-        height=900, 
-        key="my_map",               # <-- REQUIRED for callbacks
-        on_select=handle_map_click, # <-- Runs the function immediately
-        selection_mode="markers"
+        height=700,  # Adjusted height
+        key="my_map",
+        returned_objects=["last_object_clicked_tooltip"]
     )
 
-    
+    # 11. UPDATE STATE & RERUN
+    if map_data and map_data.get("last_object_clicked_tooltip"):
+        clicked_district = map_data["last_object_clicked_tooltip"]
+        
+        if st.session_state.get("user_district") != clicked_district:
+            st.session_state["user_district"] = clicked_district
+            st.rerun()
   

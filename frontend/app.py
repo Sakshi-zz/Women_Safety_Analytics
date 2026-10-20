@@ -249,5 +249,107 @@ elif page == "📈 Trends":
 # ==========================================
 elif page == "🚨 SOS":
     st.title("🚨 Emergency SOS")
+    st.markdown("Use this page to instantly alert your emergency contacts with your live location.")
+    st.markdown("---")
+
+    # --- 1. The TextBee SMS Function ---
+    def send_textbee_sms(contact_phone, user_name, maps_link):
+        # PASTE YOUR API KEY HERE
+        api_key = "YOUR_TEXTBEE_API_KEY" 
+        
+        if not contact_phone.startswith("+"):
+            contact_phone = "+91" + contact_phone  # Change +91 if not in India
+            
+        payload = {
+            "recipients": [contact_phone],
+            "message": f"🚨 SOS from {user_name}. I need help! Location: {maps_link}"
+        }
+        
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            response = requests.post(
+                "https://api.textbee.dev/api/v1/gateway/send-sms",
+                json=payload,
+                headers=headers,
+                timeout=10
+            )
+            return response.json()
+        except Exception as e:
+            return {"error": str(e)}
+
+    # --- 2. Load Saved Contacts from Session State ---
+    if "saved_name" not in st.session_state:
+        st.session_state["saved_name"] = ""
+    if "saved_phone" not in st.session_state:
+        st.session_state["saved_phone"] = ""
+
+    # --- 3. User Inputs ---
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("📱 Your Details")
+        # Pre-fill with saved data if it exists
+        user_name = st.text_input("Your Name", value=st.session_state["saved_name"], placeholder="e.g., Sakshi")
+        contact_phone = st.text_input("Emergency Contact Number", value=st.session_state["saved_phone"], placeholder="e.g., 9876543210", help="Include country code if outside India")
+        
+        # Checkbox to save the contact
+        save_contact = st.checkbox("💾 Save this contact for future emergencies")
+
+    with col2:
+        st.subheader("📍 Live Location")
+        user_lat = st.session_state.get("user_lat", "Unknown")
+        user_lon = st.session_state.get("user_lon", "Unknown")
+        current_district = st.session_state.get("user_district", "Not Selected")
+        
+        if user_lat != "Unknown" and user_lon != "Unknown":
+            st.success(f"Location Acquired: **{current_district}**")
+            st.caption(f"Coordinates: {user_lat:.4f}, {user_lon:.4f}")
+            maps_link = f"https://www.google.com/maps?q={user_lat},{user_lon}"
+        else:
+            st.warning("⚠️ Location not found. Please go to the Dashboard and select your district on the map first.")
+            maps_link = "Location not available"
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- 4. The SOS Button ---
     if st.button("🚨 SEND SOS ALERT", type="primary", use_container_width=True):
-        st.error("✅ SOS Alert Sent! (Demo mode)")
+        if not user_name or not contact_phone:
+            st.error("⚠️ Please enter your name and an emergency contact number.")
+        elif user_lat == "Unknown":
+            st.error("⚠️ Please select your district on the Dashboard map first so we can send your location.")
+        else:
+            # Save the contact if the checkbox is ticked
+            if save_contact:
+                st.session_state["saved_name"] = user_name
+                st.session_state["saved_phone"] = contact_phone
+                st.toast("Contact saved successfully! 💾")
+            
+            with st.spinner("Sending emergency SMS..."):
+                result = send_textbee_sms(contact_phone, user_name, maps_link)
+                
+                # Check if it worked
+                if "error" in result:
+                    st.error(f"❌ Failed to send SMS: {result['error']}")
+                elif result.get("data") and result["data"].get("success"):
+                    st.success("✅ SOS Alert Sent Successfully via SMS!")
+                    st.info(f"Message ID: {result['data'].get('smsBatchId')}")
+                else:
+                    st.error(f"❌ Failed to send SMS: {result}")
+
+    st.markdown("---")
+
+    # --- 5. Emergency Directory ---
+    st.subheader("📞 National Emergency Contacts")
+    col_e1, col_e2, col_e3 = st.columns(3)
+    with col_e1:
+        st.markdown("""<div style="background:#1E293B; padding:15px; border-radius:8px; border-left:4px solid #EF4444;">
+            <h4 style="color:#F1F5F9; margin:0;">Police</h4><h2 style="color:#EF4444; margin:5px 0;">100</h2></div>""", unsafe_allow_html=True)
+    with col_e2:
+        st.markdown("""<div style="background:#1E293B; padding:15px; border-radius:8px; border-left:4px solid #F59E0B;">
+            <h4 style="color:#F1F5F9; margin:0;">Women Helpline</h4><h2 style="color:#F59E0B; margin:5px 0;">1091</h2></div>""", unsafe_allow_html=True)
+    with col_e3:
+        st.markdown("""<div style="background:#1E293B; padding:15px; border-radius:8px; border-left:4px solid #10B981;">
+            <h4 style="color:#F1F5F9; margin:0;">National Emergency</h4><h2 style="color:#10B981; margin:5px 0;">112</h2></div>""", unsafe_allow_html=True)
