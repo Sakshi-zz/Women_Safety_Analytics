@@ -255,7 +255,7 @@ elif page == "🚨 SOS":
     # --- 1. The TextBee SMS Function ---
     def send_textbee_sms(contact_phone, user_name, maps_link):
         # PASTE YOUR API KEY HERE
-        api_key = "YOUR_TEXTBEE_API_KEY" 
+        api_key = "txb_HDG2dIelj0IW6MMQaCHmwXNeWqBQ0sQO" 
         
         if not contact_phone.startswith("+"):
             contact_phone = "+91" + contact_phone  # Change +91 if not in India
